@@ -57,7 +57,7 @@ def _pinv2_old(a):
 
 
 def _get_first_singular_vectors_power_method(
-    X, Y, mode="A", max_iter=500, tol=1e-06, norm_y_weights=False
+    X, Y="deprecated", y=None, mode="A", max_iter=500, tol=1e-06, norm_y_weights=False
 ):
     """Return the first left and right singular vectors of X'Y.
 
@@ -67,11 +67,22 @@ def _get_first_singular_vectors_power_method(
     "update saliences" part.
     """
 
+    if Y != "deprecated":
+        warnings.warn(
+            "`Y` is deprecated in 1.4 and will be removed in 1.6. Use `y` instead.",
+            FutureWarning,
+        )
+        if y is not None:
+            raise ValueError(
+                "Cannot use both `y` and `Y`. Use only `y` as `Y` is deprecated."
+            )
+        y = Y
+
     eps = np.finfo(X.dtype).eps
     try:
-        y_score = next(col for col in Y.T if np.any(np.abs(col) > eps))
+        y_score = next(col for col in y.T if np.any(np.abs(col) > eps))
     except StopIteration as e:
-        raise StopIteration("Y residual is constant") from e
+        raise StopIteration("y residual is constant") from e
 
     x_weights_old = 100  # init to big value for first convergence check
 
@@ -82,7 +93,7 @@ def _get_first_singular_vectors_power_method(
         # As a result, and as detailed in the Wegelin's review, CCA (i.e. mode
         # B) will be unstable if n_features > n_samples or n_targets >
         # n_samples
-        X_pinv, Y_pinv = _pinv2_old(X), _pinv2_old(Y)
+        X_pinv, y_pinv = _pinv2_old(X), _pinv2_old(y)
 
     for i in range(max_iter):
         if mode == "B":
@@ -94,17 +105,17 @@ def _get_first_singular_vectors_power_method(
         x_score = np.dot(X, x_weights)
 
         if mode == "B":
-            y_weights = np.dot(Y_pinv, x_score)
+            y_weights = np.dot(y_pinv, x_score)
         else:
-            y_weights = np.dot(Y.T, x_score) / np.dot(x_score.T, x_score)
+            y_weights = np.dot(y.T, x_score) / np.dot(x_score.T, x_score)
 
         if norm_y_weights:
             y_weights /= np.sqrt(np.dot(y_weights, y_weights)) + eps
 
-        y_score = np.dot(Y, y_weights) / (np.dot(y_weights, y_weights) + eps)
+        y_score = np.dot(y, y_weights) / (np.dot(y_weights, y_weights) + eps)
 
         x_weights_diff = x_weights - x_weights_old
-        if np.dot(x_weights_diff, x_weights_diff) < tol or Y.shape[1] == 1:
+        if np.dot(x_weights_diff, x_weights_diff) < tol or y.shape[1] == 1:
             break
         x_weights_old = x_weights
 
@@ -115,40 +126,61 @@ def _get_first_singular_vectors_power_method(
     return x_weights, y_weights, n_iter
 
 
-def _get_first_singular_vectors_svd(X, Y):
+def _get_first_singular_vectors_svd(X, Y="deprecated", y=None):
     """Return the first left and right singular vectors of X'Y.
 
     Here the whole SVD is computed.
     """
-    C = np.dot(X.T, Y)
+    if Y != "deprecated":
+        warnings.warn(
+            "`Y` is deprecated in 1.4 and will be removed in 1.6. Use `y` instead.",
+            FutureWarning,
+        )
+        if y is not None:
+            raise ValueError(
+                "Cannot use both `y` and `Y`. Use only `y` as `Y` is deprecated."
+            )
+        y = Y
+
+    C = np.dot(X.T, y)
     U, _, Vt = svd(C, full_matrices=False)
     return U[:, 0], Vt[0, :]
 
 
-def _center_scale_xy(X, Y, scale=True):
-    """Center X, Y and scale if the scale parameter==True
+def _center_scale_xy(X, Y="deprecated", y=None, scale=True):
+    """Center X, y and scale if the scale parameter==True
 
     Returns
     -------
-        X, Y, x_mean, y_mean, x_std, y_std
+        X, y, x_mean, y_mean, x_std, y_std
     """
+    if Y != "deprecated":
+        warnings.warn(
+            "`Y` is deprecated in 1.4 and will be removed in 1.6. Use `y` instead.",
+            FutureWarning,
+        )
+        if y is not None:
+            raise ValueError(
+                "Cannot use both `y` and `Y`. Use only `y` as `Y` is deprecated."
+            )
+        y = Y
     # center
     x_mean = X.mean(axis=0)
     X -= x_mean
-    y_mean = Y.mean(axis=0)
-    Y -= y_mean
+    y_mean = y.mean(axis=0)
+    y -= y_mean
     # scale
     if scale:
         x_std = X.std(axis=0, ddof=1)
         x_std[x_std == 0.0] = 1.0
         X /= x_std
-        y_std = Y.std(axis=0, ddof=1)
+        y_std = y.std(axis=0, ddof=1)
         y_std[y_std == 0.0] = 1.0
-        Y /= y_std
+        y /= y_std
     else:
         x_std = np.ones(X.shape[1])
-        y_std = np.ones(Y.shape[1])
-    return X, Y, x_mean, y_mean, x_std, y_std
+        y_std = np.ones(y.shape[1])
+    return X, y, x_mean, y_mean, x_std, y_std
 
 
 def _svd_flip_1d(u, v):
@@ -212,7 +244,7 @@ class _PLS(
         self.copy = copy
 
     @_fit_context(prefer_skip_nested_validation=True)
-    def fit(self, X, Y):
+    def fit(self, X, Y="deprecated", y=None):
         """Fit model to data.
 
         Parameters
@@ -221,31 +253,45 @@ class _PLS(
             Training vectors, where `n_samples` is the number of samples and
             `n_features` is the number of predictors.
 
+        y : array-like of shape (n_samples,) or (n_samples, n_targets)
+        Target vectors, where `n_samples` is the number of samples and
+        `n_targets` is the number of response variables.
+
         Y : array-like of shape (n_samples,) or (n_samples, n_targets)
-            Target vectors, where `n_samples` is the number of samples and
-            `n_targets` is the number of response variables.
+            .. deprecated:: 1.4
+               `Y` was renamed to `y` in version 1.4 and will be removed in 1.6.
 
         Returns
         -------
         self : object
             Fitted model.
         """
-        check_consistent_length(X, Y)
+        if Y != "deprecated":
+            warnings.warn(
+                "`Y` is deprecated in 1.4 and will be removed in 1.6. Use `y` instead.",
+                FutureWarning,
+            )
+            if y is not None:
+                raise ValueError(
+                    "Cannot use both `y` and `Y`. Use only `y` as `Y` is deprecated."
+                )
+            y = Y
+        check_consistent_length(X, y)
         X = self._validate_data(
             X, dtype=np.float64, copy=self.copy, ensure_min_samples=2
         )
-        Y = check_array(
-            Y, input_name="Y", dtype=np.float64, copy=self.copy, ensure_2d=False
+        y = check_array(
+            y, input_name="y", dtype=np.float64, copy=self.copy, ensure_2d=False
         )
-        if Y.ndim == 1:
+        if y.ndim == 1:
             self._predict_1d = True
-            Y = Y.reshape(-1, 1)
+            y = y.reshape(-1, 1)
         else:
             self._predict_1d = False
 
         n = X.shape[0]
         p = X.shape[1]
-        q = Y.shape[1]
+        q = y.shape[1]
 
         n_components = self.n_components
         # With PLSRegression n_components is bounded by the rank of (X.T X) see
@@ -262,8 +308,8 @@ class _PLS(
         norm_y_weights = self._norm_y_weights
 
         # Scale (in place)
-        Xk, Yk, self._x_mean, self._y_mean, self._x_std, self._y_std = _center_scale_xy(
-            X, Y, self.scale
+        Xk, yk, self._x_mean, self._y_mean, self._x_std, self._y_std = _center_scale_xy(
+            X, y, self.scale
         )
 
         self.x_weights_ = np.zeros((p, n_components))  # U
@@ -277,14 +323,14 @@ class _PLS(
         # This whole thing corresponds to the algorithm in section 4.1 of the
         # review from Wegelin. See above for a notation mapping from code to
         # paper.
-        Y_eps = np.finfo(Yk.dtype).eps
+        y_eps = np.finfo(yk.dtype).eps
         for k in range(n_components):
             # Find first left and right singular vectors of the X.T.dot(Y)
             # cross-covariance matrix.
             if self.algorithm == "nipals":
                 # Replace columns that are all close to zero with zeros
-                Yk_mask = np.all(np.abs(Yk) < 10 * Y_eps, axis=0)
-                Yk[:, Yk_mask] = 0.0
+                yk_mask = np.all(np.abs(yk) < 10 * y_eps, axis=0)
+                yk[:, yk_mask] = 0.0
 
                 try:
                     (
@@ -293,7 +339,7 @@ class _PLS(
                         n_iter_,
                     ) = _get_first_singular_vectors_power_method(
                         Xk,
-                        Yk,
+                        yk,
                         mode=self.mode,
                         max_iter=self.max_iter,
                         tol=self.tol,
@@ -308,7 +354,7 @@ class _PLS(
                 self.n_iter_.append(n_iter_)
 
             elif self.algorithm == "svd":
-                x_weights, y_weights = _get_first_singular_vectors_svd(Xk, Yk)
+                x_weights, y_weights = _get_first_singular_vectors_svd(Xk, yk)
 
             # inplace sign flip for consistency across solvers and archs
             _svd_flip_1d(x_weights, y_weights)
@@ -319,20 +365,20 @@ class _PLS(
                 y_ss = 1
             else:
                 y_ss = np.dot(y_weights, y_weights)
-            y_scores = np.dot(Yk, y_weights) / y_ss
+            y_scores = np.dot(yk, y_weights) / y_ss
 
             # Deflation: subtract rank-one approx to obtain Xk+1 and Yk+1
             x_loadings = np.dot(x_scores, Xk) / np.dot(x_scores, x_scores)
             Xk -= np.outer(x_scores, x_loadings)
 
             if self.deflation_mode == "canonical":
-                # regress Yk on y_score
-                y_loadings = np.dot(y_scores, Yk) / np.dot(y_scores, y_scores)
-                Yk -= np.outer(y_scores, y_loadings)
+                # regress yk on y_score
+                y_loadings = np.dot(y_scores, yk) / np.dot(y_scores, y_scores)
+                yk -= np.outer(y_scores, y_loadings)
             if self.deflation_mode == "regression":
-                # regress Yk on x_score
-                y_loadings = np.dot(x_scores, Yk) / np.dot(x_scores, x_scores)
-                Yk -= np.outer(x_scores, y_loadings)
+                # regress yk on x_score
+                y_loadings = np.dot(x_scores, yk) / np.dot(x_scores, x_scores)
+                yk -= np.outer(x_scores, y_loadings)
 
             self.x_weights_[:, k] = x_weights
             self.y_weights_[:, k] = y_weights
@@ -362,7 +408,7 @@ class _PLS(
         self._n_features_out = self.x_rotations_.shape[1]
         return self
 
-    def transform(self, X, Y=None, copy=True):
+    def transform(self, X, y=None, Y="deprecated", copy=True):
         """Apply the dimension reduction.
 
         Parameters
@@ -370,17 +416,32 @@ class _PLS(
         X : array-like of shape (n_samples, n_features)
             Samples to transform.
 
-        Y : array-like of shape (n_samples, n_targets), default=None
+        y : array-like of shape (n_samples, n_targets), default=None
             Target vectors.
 
+        Y : array-like of shape (n_samples, n_targets), default=None
+            .. deprecated:: 1.4
+                `Y` was renamed to `y` in version 1.4 and will be removed in 1.6.
+
         copy : bool, default=True
-            Whether to copy `X` and `Y`, or perform in-place normalization.
+            Whether to copy `X` and `y`, or perform in-place normalization.
 
         Returns
         -------
         x_scores, y_scores : array-like or tuple of array-like
-            Return `x_scores` if `Y` is not given, `(x_scores, y_scores)` otherwise.
+            Return `x_scores` if `y` is not given, `(x_scores, y_scores)` otherwise.
         """
+        if Y != "deprecated":
+            warnings.warn(
+                "`Y` is deprecated in 1.4 and will be removed in 1.6. Use `y` instead.",
+                FutureWarning,
+            )
+            if y is not None:
+                raise ValueError(
+                    "Cannot use both `y` and `Y`. Use only `y` as `Y` is deprecated."
+                )
+            y = Y
+
         check_is_fitted(self)
         X = self._validate_data(X, copy=copy, dtype=FLOAT_DTYPES, reset=False)
         # Normalize
@@ -388,20 +449,20 @@ class _PLS(
         X /= self._x_std
         # Apply rotation
         x_scores = np.dot(X, self.x_rotations_)
-        if Y is not None:
-            Y = check_array(
-                Y, input_name="Y", ensure_2d=False, copy=copy, dtype=FLOAT_DTYPES
+        if y is not None:
+            y = check_array(
+                y, input_name="y", ensure_2d=False, copy=copy, dtype=FLOAT_DTYPES
             )
-            if Y.ndim == 1:
-                Y = Y.reshape(-1, 1)
-            Y -= self._y_mean
-            Y /= self._y_std
-            y_scores = np.dot(Y, self.y_rotations_)
+            if y.ndim == 1:
+                y = y.reshape(-1, 1)
+            y -= self._y_mean
+            y /= self._y_std
+            y_scores = np.dot(y, self.y_rotations_)
             return x_scores, y_scores
 
         return x_scores
 
-    def inverse_transform(self, X, Y=None):
+    def inverse_transform(self, X, y=None, Y="deprecated"):
         """Transform data back to its original space.
 
         Parameters
@@ -410,9 +471,13 @@ class _PLS(
             New data, where `n_samples` is the number of samples
             and `n_components` is the number of pls components.
 
-        Y : array-like of shape (n_samples, n_components)
+        y : array-like of shape (n_samples, n_components), default=None
             New target, where `n_samples` is the number of samples
             and `n_components` is the number of pls components.
+
+        Y : array-like of shape (n_samples, n_components), default=None
+            .. deprecated:: 1.4
+            `Y` was renamed to `y` in version 1.4 and will be removed in 1.6.
 
         Returns
         -------
@@ -420,12 +485,23 @@ class _PLS(
             Return the reconstructed `X` data.
 
         Y_reconstructed : ndarray of shape (n_samples, n_targets)
-            Return the reconstructed `X` target. Only returned when `Y` is given.
+            Return the reconstructed `y` target. Only returned when `y` is given.
 
         Notes
         -----
         This transformation will only be exact if `n_components=n_features`.
         """
+        if Y != "deprecated":
+            warnings.warn(
+                "`Y` is deprecated in 1.4 and will be removed in 1.6. Use `y` instead.",
+                FutureWarning,
+            )
+            if y is not None:
+                raise ValueError(
+                    "Cannot use both `y` and `Y`. Use only `y` as `Y` is deprecated."
+                )
+            y = Y
+
         check_is_fitted(self)
         X = check_array(X, input_name="X", dtype=FLOAT_DTYPES)
         # From pls space to original space
@@ -434,14 +510,14 @@ class _PLS(
         X_reconstructed *= self._x_std
         X_reconstructed += self._x_mean
 
-        if Y is not None:
-            Y = check_array(Y, input_name="Y", dtype=FLOAT_DTYPES)
+        if y is not None:
+            y = check_array(y, input_name="y", dtype=FLOAT_DTYPES)
             # From pls space to original space
-            Y_reconstructed = np.matmul(Y, self.y_loadings_.T)
+            y_reconstructed = np.matmul(y, self.y_loadings_.T)
             # Denormalize
-            Y_reconstructed *= self._y_std
-            Y_reconstructed += self._y_mean
-            return X_reconstructed, Y_reconstructed
+            y_reconstructed *= self._y_std
+            y_reconstructed += self._y_mean
+            return X_reconstructed, y_reconstructed
 
         return X_reconstructed
 
@@ -472,10 +548,10 @@ class _PLS(
         # Normalize
         X -= self._x_mean
         X /= self._x_std
-        Ypred = X @ self.coef_.T + self.intercept_
-        return Ypred.ravel() if self._predict_1d else Ypred
+        ypred = X @ self.coef_.T + self.intercept_
+        return ypred.ravel() if self._predict_1d else ypred
 
-    def fit_transform(self, X, y=None):
+    def fit_transform(self, X, y=None, Y="deprecated"):
         """Learn and apply the dimension reduction on the train data.
 
         Parameters
@@ -488,11 +564,26 @@ class _PLS(
             Target vectors, where `n_samples` is the number of samples and
             `n_targets` is the number of response variables.
 
+        Y : array-like of shape (n_samples, n_targets), default=None
+            .. deprecated:: 1.4
+            `Y` was renamed to `y` in version 1.4 and will be removed in 1.6.
+
         Returns
         -------
         self : ndarray of shape (n_samples, n_components)
-            Return `x_scores` if `Y` is not given, `(x_scores, y_scores)` otherwise.
+            Return `x_scores` if `y` is not given, `(x_scores, y_scores)` otherwise.
         """
+        if Y != "deprecated":
+            warnings.warn(
+                "`Y` is deprecated in 1.4 and will be removed in 1.6. Use `y` instead.",
+                FutureWarning,
+            )
+            if y is not None:
+                raise ValueError(
+                    "Cannot use both `y` and `Y`. Use only `y` as `Y` is deprecated."
+                )
+            y = Y
+
         return self.fit(X, y).transform(X, y)
 
     def _more_tags(self):
@@ -591,11 +682,11 @@ class PLSRegression(_PLS):
     --------
     >>> from sklearn.cross_decomposition import PLSRegression
     >>> X = [[0., 0., 1.], [1.,0.,0.], [2.,2.,2.], [2.,5.,4.]]
-    >>> Y = [[0.1, -0.2], [0.9, 1.1], [6.2, 5.9], [11.9, 12.3]]
+    >>> y = [[0.1, -0.2], [0.9, 1.1], [6.2, 5.9], [11.9, 12.3]]
     >>> pls2 = PLSRegression(n_components=2)
     >>> pls2.fit(X, Y)
     PLSRegression()
-    >>> Y_pred = pls2.predict(X)
+    >>> y_pred = pls2.predict(X)
     """
 
     _parameter_constraints: dict = {**_PLS._parameter_constraints}
@@ -622,7 +713,7 @@ class PLSRegression(_PLS):
             copy=copy,
         )
 
-    def fit(self, X, Y):
+    def fit(self, X, y=None, Y="deprecated"):
         """Fit model to data.
 
         Parameters
@@ -631,16 +722,31 @@ class PLSRegression(_PLS):
             Training vectors, where `n_samples` is the number of samples and
             `n_features` is the number of predictors.
 
-        Y : array-like of shape (n_samples,) or (n_samples, n_targets)
+        y : array-like of shape (n_samples,) or (n_samples, n_targets), default=None
             Target vectors, where `n_samples` is the number of samples and
             `n_targets` is the number of response variables.
+
+        Y : array-like of shape (n_samples,) or (n_samples, n_targets), default=None
+            .. deprecated:: 1.4
+            `Y` was renamed to `y` in version 1.4 and will be removed in 1.6.
 
         Returns
         -------
         self : object
             Fitted model.
         """
-        super().fit(X, Y)
+        if Y != "deprecated":
+            warnings.warn(
+                "`Y` is deprecated in 1.4 and will be removed in 1.6. Use `y` instead.",
+                FutureWarning,
+            )
+            if y is not None:
+                raise ValueError(
+                    "Cannot use both `y` and `Y`. Use only `y` as `Y` is deprecated."
+                )
+            y = Y
+
+        super().fit(X, y)  # Change the call to the superclass fit method
         # expose the fitted attributes `x_scores_` and `y_scores_`
         self.x_scores_ = self._x_scores
         self.y_scores_ = self._y_scores
@@ -736,11 +842,11 @@ class PLSCanonical(_PLS):
     --------
     >>> from sklearn.cross_decomposition import PLSCanonical
     >>> X = [[0., 0., 1.], [1.,0.,0.], [2.,2.,2.], [2.,5.,4.]]
-    >>> Y = [[0.1, -0.2], [0.9, 1.1], [6.2, 5.9], [11.9, 12.3]]
+    >>> y = [[0.1, -0.2], [0.9, 1.1], [6.2, 5.9], [11.9, 12.3]]
     >>> plsca = PLSCanonical(n_components=2)
-    >>> plsca.fit(X, Y)
+    >>> plsca.fit(X, y)
     PLSCanonical()
-    >>> X_c, Y_c = plsca.transform(X, Y)
+    >>> X_c, y_c = plsca.transform(X, y)
     """
 
     _parameter_constraints: dict = {**_PLS._parameter_constraints}
@@ -818,21 +924,21 @@ class CCA(_PLS):
         The loadings of `X`.
 
     y_loadings_ : ndarray of shape (n_targets, n_components)
-        The loadings of `Y`.
+        The loadings of `y`.
 
     x_rotations_ : ndarray of shape (n_features, n_components)
         The projection matrix used to transform `X`.
 
     y_rotations_ : ndarray of shape (n_features, n_components)
-        The projection matrix used to transform `Y`.
+        The projection matrix used to transform `y`.
 
     coef_ : ndarray of shape (n_targets, n_features)
-        The coefficients of the linear model such that `Y` is approximated as
-        `Y = X @ coef_.T + intercept_`.
+        The coefficients of the linear model such that `y` is approximated as
+        `y = X @ coef_.T + intercept_`.
 
     intercept_ : ndarray of shape (n_targets,)
-        The intercepts of the linear model such that `Y` is approximated as
-        `Y = X @ coef_.T + intercept_`.
+        The intercepts of the linear model such that `y` is approximated as
+        `y = X @ coef_.T + intercept_`.
 
         .. versionadded:: 1.1
 
@@ -858,11 +964,11 @@ class CCA(_PLS):
     --------
     >>> from sklearn.cross_decomposition import CCA
     >>> X = [[0., 0., 1.], [1.,0.,0.], [2.,2.,2.], [3.,5.,4.]]
-    >>> Y = [[0.1, -0.2], [0.9, 1.1], [6.2, 5.9], [11.9, 12.3]]
+    >>> y = [[0.1, -0.2], [0.9, 1.1], [6.2, 5.9], [11.9, 12.3]]
     >>> cca = CCA(n_components=1)
-    >>> cca.fit(X, Y)
+    >>> cca.fit(X, y)
     CCA(n_components=1)
-    >>> X_c, Y_c = cca.transform(X, Y)
+    >>> X_c, y_c = cca.transform(X, y)
     """
 
     _parameter_constraints: dict = {**_PLS._parameter_constraints}
@@ -888,8 +994,8 @@ class PLSSVD(ClassNamePrefixFeaturesOutMixin, TransformerMixin, BaseEstimator):
     """Partial Least Square SVD.
 
     This transformer simply performs a SVD on the cross-covariance matrix
-    `X'Y`. It is able to project both the training data `X` and the targets
-    `Y`. The training data `X` is projected on the left singular vectors, while
+    `X'y`. It is able to project both the training data `X` and the targets
+    `y`. The training data `X` is projected on the left singular vectors, while
     the targets are projected on the right singular vectors.
 
     Read more in the :ref:`User Guide <cross_decomposition>`.
@@ -942,13 +1048,13 @@ class PLSSVD(ClassNamePrefixFeaturesOutMixin, TransformerMixin, BaseEstimator):
     ...               [1., 0., 0.],
     ...               [2., 2., 2.],
     ...               [2., 5., 4.]])
-    >>> Y = np.array([[0.1, -0.2],
+    >>> y = np.array([[0.1, -0.2],
     ...               [0.9, 1.1],
     ...               [6.2, 5.9],
     ...               [11.9, 12.3]])
     >>> pls = PLSSVD(n_components=2).fit(X, Y)
-    >>> X_c, Y_c = pls.transform(X, Y)
-    >>> X_c.shape, Y_c.shape
+    >>> X_c, y_c = pls.transform(X, y)
+    >>> X_c.shape, y_c.shape
     ((4, 2), (4, 2))
     """
 
@@ -964,7 +1070,7 @@ class PLSSVD(ClassNamePrefixFeaturesOutMixin, TransformerMixin, BaseEstimator):
         self.copy = copy
 
     @_fit_context(prefer_skip_nested_validation=True)
-    def fit(self, X, Y):
+    def fit(self, X, y=None, Y="deprecated"):
         """Fit model to data.
 
         Parameters
@@ -972,41 +1078,56 @@ class PLSSVD(ClassNamePrefixFeaturesOutMixin, TransformerMixin, BaseEstimator):
         X : array-like of shape (n_samples, n_features)
             Training samples.
 
-        Y : array-like of shape (n_samples,) or (n_samples, n_targets)
+        y : array-like of shape (n_samples,) or (n_samples, n_targets), default=None
             Targets.
+
+        Y : array-like of shape (n_samples,) or (n_samples, n_targets), default=None
+            .. deprecated:: 1.4
+            `Y` was renamed to `y` in version 1.4 and will be removed in 1.6.
 
         Returns
         -------
         self : object
             Fitted estimator.
         """
-        check_consistent_length(X, Y)
+        if Y != "deprecated":
+            warnings.warn(
+                "`Y` is deprecated in 1.4 and will be removed in 1.6. Use `y` instead.",
+                FutureWarning,
+            )
+            if y is not None:
+                raise ValueError(
+                    "Cannot use both `y` and `Y`. Use only `y` as `Y` is deprecated."
+                )
+            y = Y
+
+        check_consistent_length(X, y)
         X = self._validate_data(
             X, dtype=np.float64, copy=self.copy, ensure_min_samples=2
         )
-        Y = check_array(
-            Y, input_name="Y", dtype=np.float64, copy=self.copy, ensure_2d=False
+        y = check_array(
+            y, input_name="y", dtype=np.float64, copy=self.copy, ensure_2d=False
         )
-        if Y.ndim == 1:
-            Y = Y.reshape(-1, 1)
+        if y.ndim == 1:
+            y = y.reshape(-1, 1)
 
-        # we'll compute the SVD of the cross-covariance matrix = X.T.dot(Y)
+        # we'll compute the SVD of the cross-covariance matrix = X.T.dot(y)
         # This matrix rank is at most min(n_samples, n_features, n_targets) so
         # n_components cannot be bigger than that.
         n_components = self.n_components
-        rank_upper_bound = min(X.shape[0], X.shape[1], Y.shape[1])
+        rank_upper_bound = min(X.shape[0], X.shape[1], y.shape[1])
         if n_components > rank_upper_bound:
             raise ValueError(
                 f"`n_components` upper bound is {rank_upper_bound}. "
                 f"Got {n_components} instead. Reduce `n_components`."
             )
 
-        X, Y, self._x_mean, self._y_mean, self._x_std, self._y_std = _center_scale_xy(
-            X, Y, self.scale
+        X, y, self._x_mean, self._y_mean, self._x_std, self._y_std = _center_scale_xy(
+            X, y, self.scale
         )
 
         # Compute SVD of cross-covariance matrix
-        C = np.dot(X.T, Y)
+        C = np.dot(X.T, y)
         U, s, Vt = svd(C, full_matrices=False)
         U = U[:, :n_components]
         Vt = Vt[:n_components]
@@ -1018,7 +1139,7 @@ class PLSSVD(ClassNamePrefixFeaturesOutMixin, TransformerMixin, BaseEstimator):
         self._n_features_out = self.x_weights_.shape[1]
         return self
 
-    def transform(self, X, Y=None):
+    def transform(self, X, y=None, Y="deprecated"):
         """
         Apply the dimensionality reduction.
 
@@ -1027,30 +1148,44 @@ class PLSSVD(ClassNamePrefixFeaturesOutMixin, TransformerMixin, BaseEstimator):
         X : array-like of shape (n_samples, n_features)
             Samples to be transformed.
 
-        Y : array-like of shape (n_samples,) or (n_samples, n_targets), \
-                default=None
+        y : array-like of shape (n_samples,) or (n_samples, n_targets), default=None
             Targets.
+
+        Y : array-like of shape (n_samples,) or (n_samples, n_targets), default=None
+            .. deprecated:: 1.4
+            `Y` was renamed to `y` in version 1.4 and will be removed in 1.6.
 
         Returns
         -------
         x_scores : array-like or tuple of array-like
-            The transformed data `X_transformed` if `Y is not None`,
-            `(X_transformed, Y_transformed)` otherwise.
+            The transformed data `X_transformed` if `y is not None`,
+            `(X_transformed, y_transformed)` otherwise.
         """
+        if Y != "deprecated":
+            warnings.warn(
+                "`Y` is deprecated in 1.4 and will be removed in 1.6. Use `y` instead.",
+                FutureWarning,
+            )
+            if y is not None:
+                raise ValueError(
+                    "Cannot use both `y` and `Y`. Use only `y` as `Y` is deprecated."
+                )
+            y = Y
+
         check_is_fitted(self)
         X = self._validate_data(X, dtype=np.float64, reset=False)
         Xr = (X - self._x_mean) / self._x_std
         x_scores = np.dot(Xr, self.x_weights_)
-        if Y is not None:
-            Y = check_array(Y, input_name="Y", ensure_2d=False, dtype=np.float64)
-            if Y.ndim == 1:
-                Y = Y.reshape(-1, 1)
-            Yr = (Y - self._y_mean) / self._y_std
-            y_scores = np.dot(Yr, self.y_weights_)
+        if y is not None:
+            y = check_array(y, input_name="y", ensure_2d=False, dtype=np.float64)
+            if y.ndim == 1:
+                y = y.reshape(-1, 1)
+            yr = (y - self._y_mean) / self._y_std
+            y_scores = np.dot(yr, self.y_weights_)
             return x_scores, y_scores
         return x_scores
 
-    def fit_transform(self, X, y=None):
+    def fit_transform(self, X, y=None, Y="deprecated"):
         """Learn and apply the dimensionality reduction.
 
         Parameters
@@ -1058,14 +1193,28 @@ class PLSSVD(ClassNamePrefixFeaturesOutMixin, TransformerMixin, BaseEstimator):
         X : array-like of shape (n_samples, n_features)
             Training samples.
 
-        y : array-like of shape (n_samples,) or (n_samples, n_targets), \
-                default=None
+        y : array-like of shape (n_samples,) or (n_samples, n_targets), default=None
             Targets.
+
+        Y : array-like of shape (n_samples,) or (n_samples, n_targets), default=None
+            .. deprecated:: 1.4
+            `Y` was renamed to `y` in version 1.4 and will be removed in 1.6.
 
         Returns
         -------
         out : array-like or tuple of array-like
-            The transformed data `X_transformed` if `Y is not None`,
-            `(X_transformed, Y_transformed)` otherwise.
+            The transformed data `X_transformed` if `y is not None`,
+            `(X_transformed, y_transformed)` otherwise.
         """
+        if Y != "deprecated":
+            warnings.warn(
+                "`Y` is deprecated in 1.4 and will be removed in 1.6. Use `y` instead.",
+                FutureWarning,
+            )
+            if y is not None:
+                raise ValueError(
+                    "Cannot use both `y` and `Y`. Use only `y` as `Y` is deprecated."
+                )
+            y = Y
+
         return self.fit(X, y).transform(X, y)
